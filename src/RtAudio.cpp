@@ -380,6 +380,40 @@ public:
 
 #endif
 
+#if defined(__LINUX_BELA__)
+
+#include "Bela.h"
+
+class RtApiBela: public RtApi
+{
+public:
+
+  RtApiBela();
+  ~RtApiBela();
+  RtAudio::Api getCurrentApi() override { return RtAudio::LINUX_BELA; }
+  void closeStream( void ) override;
+  RtAudioErrorType startStream( void ) override;
+  RtAudioErrorType stopStream( void ) override;
+  RtAudioErrorType abortStream( void ) override;
+
+  // This function is intended for internal use only.  It must be
+  // public because it is called by the internal callback handler,
+  // which is not a member of RtAudio.  External use of this function
+  // will most likely produce highly undesirable results!
+  void callbackEvent( BelaContext *context );
+
+  private:
+
+  void probeDevices( void ) override; 
+  bool probeDeviceInfo( RtAudio::DeviceInfo &info);
+  bool probeDeviceOpen( unsigned int deviceId, StreamMode mode, unsigned int channels, 
+                        unsigned int firstChannel, unsigned int sampleRate,
+                        RtAudioFormat format, unsigned int *bufferSize,
+                        RtAudio::StreamOptions *options ) override;
+};
+
+#endif
+
 #if defined(__RTAUDIO_DUMMY__)
 
 class RtApiDummy: public RtApi
@@ -424,6 +458,7 @@ const char* rtaudio_api_names[][2] = {
   { "jack"        , "Jack" },
   { "pulse"       , "Pulse" },
   { "oss"         , "OpenSoundSystem" },
+  { "bela"         , "Bela" },
   { "asio"        , "ASIO" },
   { "wasapi"      , "WASAPI" },
   { "ds"          , "DirectSound" },
@@ -450,6 +485,9 @@ extern "C" const RtAudio::Api rtaudio_compiled_apis[] = {
 #endif
 #if defined(__LINUX_OSS__)
   RtAudio::LINUX_OSS,
+#endif
+#if defined(__LINUX_BELA__)
+  RtAudio::LINUX_BELA,
 #endif
 #if defined(__WINDOWS_ASIO__)
   RtAudio::WINDOWS_ASIO,
@@ -537,6 +575,10 @@ void RtAudio :: openRtApi( RtAudio::Api api )
 #if defined(__LINUX_OSS__)
   if ( api == LINUX_OSS )
     rtapi_ = new RtApiOss();
+#endif
+#if defined(__LINUX_BELA__)
+  if ( api == LINUX_BELA )
+    rtapi_ = new RtApiBela();
 #endif
 #if defined(__WINDOWS_ASIO__)
   if ( api == WINDOWS_ASIO )
@@ -10854,6 +10896,179 @@ static void *ossCallbackHandler( void *ptr )
 }
 
 //******************** End of __LINUX_OSS__ *********************//
+#endif
+
+#if defined(__LINUX_BELA__)
+
+RtApiBela :: RtApiBela() 
+{
+  // errorText_ = "RtApiBela: This class provides no functionality."; error( RTAUDIO_WARNING );
+}
+
+RtApiBela :: ~RtApiBela()
+{
+  // The subclass destructor gets called before the base class
+  // destructor, so close an existing stream before deallocating
+  // apiDeviceId memory. 
+  if ( stream_.state != STREAM_CLOSED ) closeStream();
+}
+
+void RtApiBela :: probeDevices( void )
+{
+  // See list of required functionality in RtApi::probeDevices().
+  errorText_ = "RtApiBela: This class provides experimental functionality."; error( RTAUDIO_WARNING );
+  if(deviceList_.size() > 0) return;
+  RtAudio::DeviceInfo info;
+  info.ID = 0;
+  info.outputChannels = 2;
+  info.inputChannels = 2;
+  info.isDefaultOutput = true;
+  info.isDefaultInput = true;
+  deviceList_.push_back(info);
+}
+
+bool RtApiBela::probeDeviceOpen( unsigned int deviceId, StreamMode mode, unsigned int channels,
+                                   unsigned int firstChannel, unsigned int sampleRate,
+                                   RtAudioFormat format, unsigned int *bufferSize,
+                                   RtAudio::StreamOptions *options )
+{
+  
+  stream_.doByteSwap[mode] = false;
+  stream_.userFormat = format;
+  stream_.deviceFormat[mode] = RTAUDIO_FLOAT32;
+  stream_.nDeviceChannels[mode] = channels;
+
+  stream_.nUserChannels[mode] = 1;
+  stream_.channelOffset[mode] = 0;  
+
+  stream_.userInterleaved = false;
+  stream_.deviceInterleaved[mode] = true;
+
+  // Set flags for buffer conversion.
+  stream_.doConvertBuffer[mode] = false;
+
+  // Allocate necessary internal buffers.
+  unsigned long bufferBytes;
+  bufferBytes = stream_.nUserChannels[mode] * *bufferSize * formatBytes( stream_.userFormat );
+  fprintf(stdout, "probeDeviceOpen: stream bufferBytes: %lu", bufferBytes);
+  stream_.userBuffer[mode] = (char *) calloc( bufferBytes, 1 );
+  if ( stream_.userBuffer[mode] == NULL ) {
+    errorText_ = "RtApiCore::probeDeviceOpen: error allocating user buffer memory.";
+    error( RTAUDIO_WARNING );
+  }
+  
+  stream_.bufferSize = *bufferSize;
+  stream_.nBuffers = channels;
+
+  stream_.sampleRate = sampleRate;
+  stream_.deviceId[mode] = deviceId;
+  stream_.state = STREAM_STOPPED;
+  stream_.callbackInfo.object = (void *) this;
+  stream_.mode = mode;
+  return SUCCESS;
+}
+
+void RtApiBela::closeStream( void )
+{
+
+}
+
+bool setup(BelaContext *context, void *callbackInfoPointer)
+{
+  return true;
+}
+
+void render(BelaContext *context, void *callbackInfoPointer)
+{ 
+  CallbackInfo *info = (CallbackInfo *) callbackInfoPointer;
+  if(info == NULL || info->object == NULL){
+    fprintf(stderr,"Error: info pointer is null\n"); 
+  } else {
+    RtApiBela *object = (RtApiBela *) info->object;
+    object->callbackEvent(context);
+  }
+}
+
+void cleanup(BelaContext *context, void *userData)
+{
+
+}
+
+void RtApiBela :: callbackEvent( BelaContext *context ){
+  CallbackInfo *info = (CallbackInfo *) &stream_.callbackInfo;
+  RtAudioCallback callback = (RtAudioCallback) info->callback;
+
+  double streamTime = getStreamTime();
+  RtAudioStreamStatus status = 0;
+  
+  #if 1
+  int cbReturnValue = callback( stream_.userBuffer[0], stream_.userBuffer[1],
+                                stream_.bufferSize, streamTime, status, info->userData );
+  #endif
+  #if 0
+  int cbReturnValue = callback( (void *)context->audioOut, (void *)context->audioIn,
+                                stream_.bufferSize, streamTime, status, info->userData );
+
+  #endif
+  // float *samples = (float *) stream_.userBuffer[0];
+  
+  unsigned long bufferBytes;
+  bufferBytes =  2*stream_.bufferSize * formatBytes( stream_.userFormat );
+  memcpy(context->audioOut, stream_.userBuffer[0], bufferBytes);
+  // for(unsigned int n = 0; n < context->audioFrames; n++) {
+    // for(unsigned int channel = 0; channel < context->audioOutChannels; channel++) {
+      // audioWrite(context, n, 0, *samples++);
+    // }
+  // }
+}
+
+RtAudioErrorType RtApiBela :: startStream()
+{
+  // Bela_setVerboseLevel(1);
+
+  BelaInitSettings* settings = Bela_InitSettings_alloc(); // Standard audio settings;
+  Bela_defaultSettings(settings);
+  settings->setup = setup;
+  settings->render = render;
+  settings->cleanup = cleanup;
+  // Initialise the PRU audio device
+  if(Bela_initAudio(settings, (void* )&stream_.callbackInfo) != 0) {
+    Bela_InitSettings_free(settings);
+    fprintf(stderr,"Error: unable to initialise audio\n");
+    return error( RTAUDIO_SYSTEM_ERROR );
+  }
+  Bela_InitSettings_free(settings);
+
+  // Start the audio device running
+  if(Bela_startAudio()) {
+    fprintf(stderr,"Error: unable to start real-time audio\n"); 
+    // Stop the audio device
+    Bela_stopAudio();
+    // Clean up any resources allocated for audio
+    Bela_cleanupAudio();
+    return error( RTAUDIO_SYSTEM_ERROR );
+  }
+
+  return RTAUDIO_NO_ERROR;
+  
+}
+
+RtAudioErrorType RtApiBela :: stopStream( void )
+{
+  // Stop the audio device
+  Bela_stopAudio();
+
+  // Clean up any resources allocated for audio
+  Bela_cleanupAudio();
+  return RTAUDIO_NO_ERROR;
+}
+
+RtAudioErrorType RtApiBela::abortStream( void )
+{
+  return RTAUDIO_NO_ERROR;
+}
+
+//******************** End of __LINUX_BELA__ *********************//
 #endif
 
 

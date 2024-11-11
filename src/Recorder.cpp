@@ -280,7 +280,7 @@ StkFloat Recorder::tick( unsigned int )
 
   // Calculate coefficients for resonant filter
   StkFloat b_jet[3] = { b0_jet, 0, -b0_jet };
-  StkFloat a_jet[3] = { 1, -2 * r_jet * cos(2 * PI * fc_jet * T), r_jet * r_jet };
+  StkFloat a_jet[3] = { 1, static_cast<StkFloat>(-2 * r_jet * cos(2 * PI * fc_jet * T)), r_jet * r_jet };
   std::vector<StkFloat> b_jetcoeffs( &b_jet[0], &b_jet[0]+3 );
   std::vector<StkFloat> a_jetcoeffs( &a_jet[0], &a_jet[0]+3 );
   jetFilter_.setCoefficients( b_jetcoeffs, a_jetcoeffs );

@@ -75,7 +75,7 @@ namespace stk {
 // following user-definable floating-point type.  You
 // can change this to "float" if you prefer or perhaps
 // a "long double" in the future.
-typedef double StkFloat;
+typedef float StkFloat;
 
 //! STK error handling class.
 /*!
@@ -600,7 +600,7 @@ const StkFloat SRATE = 44100.0;
 // clicks are occuring in the input and/or output sound stream, a
 // larger buffer size may help.  Larger buffer sizes, however, produce
 // more latency.
-const unsigned int RT_BUFFER_SIZE = 512;
+const unsigned int RT_BUFFER_SIZE = 16;
 
 // The default rawwave path value is set with the preprocessor
 // definition RAWWAVE_PATH.  This can be specified as an argument to
@@ -622,7 +622,7 @@ const StkFloat ONE_OVER_128 = 0.0078125;
 #if defined(__WINDOWS_DS__) || defined(__WINDOWS_ASIO__) || defined(__WINDOWS_MM__)
   #define __OS_WINDOWS__
   #define __STK_REALTIME__
-#elif defined(__LINUX_OSS__) || defined(__LINUX_ALSA__) || defined(__UNIX_JACK__) || defined(__LINUX_PULSE__)
+#elif defined(__LINUX_OSS__) || defined(__LINUX_ALSA__) || defined(__UNIX_JACK__) || defined(__LINUX_PULSE__) || defined(__LINUX_BELA__)
   #define __OS_LINUX__
   #define __STK_REALTIME__
 #elif defined(__IRIX_AL__)
