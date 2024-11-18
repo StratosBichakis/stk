@@ -10989,6 +10989,7 @@ bool RtApiBela::probeDeviceOpen( unsigned int deviceId, StreamMode mode, unsigne
     goto Exit;
   }
 
+  stream_.state = STREAM_STOPPED;
   stream_.callbackInfo.object = (void *) this;
   stream_.mode = mode;
   return SUCCESS;
@@ -10999,13 +11000,36 @@ Exit:
     errorText_ = errorText;
     error( errorType );
   }
-  stream_.state = STREAM_STOPPED;
+  stream_.state = STREAM_STOPPING;
+  closeStream();
   return FAILURE;
 }
 
 void RtApiBela::closeStream( void )
 {
+  if ( stream_.state == STREAM_CLOSED ) {
+    errorText_ = "RtApiCore::closeStream(): no open stream to close!";
+    error( RTAUDIO_WARNING );
+    return;
+  }
+  if ( stream_.state == STREAM_RUNNING ){
+    // Stop the audio device
+    Bela_stopAudio();
+    // Clean up any resources allocated for audio
+    Bela_cleanupAudio();
+  }
 
+  for ( int i=0; i<2; i++ ) {
+    if ( stream_.userBuffer[i] ) {
+      free( stream_.userBuffer[i] );
+      stream_.userBuffer[i] = 0;
+    }
+  }
+
+  if ( stream_.deviceBuffer ) {
+    stream_.deviceBuffer = 0;
+  }
+  stream_.state = STREAM_STOPPED;
 }
 
 bool setup(BelaContext *context, void *callbackInfoPointer)
@@ -11030,6 +11054,13 @@ void cleanup(BelaContext *context, void *userData)
 }
 
 void RtApiBela :: callbackEvent( BelaContext *context ){
+  if ( stream_.state == STREAM_STOPPED || stream_.state == STREAM_STOPPING ) return;
+  if ( stream_.state == STREAM_CLOSED ) {
+    errorText_ = "RtApiCore::callbackEvent(): the stream is closed ... this shouldn't happen!";
+    error( RTAUDIO_WARNING );
+    return;
+  }
+
   CallbackInfo *info = (CallbackInfo *) &stream_.callbackInfo;
   RtAudioCallback callback = (RtAudioCallback) info->callback;
 
@@ -11059,6 +11090,13 @@ void RtApiBela :: callbackEvent( BelaContext *context ){
 
 RtAudioErrorType RtApiBela :: startStream()
 {
+  if ( stream_.state != STREAM_STOPPED ) {
+    if ( stream_.state == STREAM_RUNNING )
+      errorText_ = "RtApiCore::startStream(): the stream is already running!";
+    else if ( stream_.state == STREAM_STOPPING || stream_.state == STREAM_CLOSED )
+      errorText_ = "RtApiCore::startStream(): the stream is stopping or closed!";
+    return error( RTAUDIO_WARNING );
+  }
   // Bela_setVerboseLevel(1);
 
   BelaInitSettings* settings = Bela_InitSettings_alloc(); // Standard audio settings;
@@ -11084,23 +11122,41 @@ RtAudioErrorType RtApiBela :: startStream()
     return error( RTAUDIO_SYSTEM_ERROR );
   }
 
+  stream_.state = STREAM_RUNNING;
   return RTAUDIO_NO_ERROR;
   
 }
 
 RtAudioErrorType RtApiBela :: stopStream( void )
 {
+  if ( stream_.state != STREAM_RUNNING && stream_.state != STREAM_STOPPING ) {
+    if ( stream_.state == STREAM_STOPPED )
+      errorText_ = "RtApiCore::stopStream(): the stream is already stopped!";
+    else if ( stream_.state == STREAM_CLOSED )
+      errorText_ = "RtApiCore::stopStream(): the stream is closed!";
+    return error( RTAUDIO_WARNING );
+  }
   // Stop the audio device
   Bela_stopAudio();
 
   // Clean up any resources allocated for audio
   Bela_cleanupAudio();
+  stream_.state = STREAM_STOPPED;
   return RTAUDIO_NO_ERROR;
 }
 
 RtAudioErrorType RtApiBela::abortStream( void )
 {
-  return RTAUDIO_NO_ERROR;
+  if ( stream_.state != STREAM_RUNNING ) {
+    if ( stream_.state == STREAM_STOPPED )
+      errorText_ = "RtApiCore::abortStream(): the stream is already stopped!";
+    else if ( stream_.state == STREAM_STOPPING || stream_.state == STREAM_CLOSED )
+      errorText_ = "RtApiCore::abortStream(): the stream is stopping or closed!";
+    return error( RTAUDIO_WARNING );
+  }
+
+  stream_.state = STREAM_STOPPING;
+  return stopStream();
 }
 
 //******************** End of __LINUX_BELA__ *********************//
