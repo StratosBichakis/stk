@@ -10924,6 +10924,7 @@ void RtApiBela :: probeDevices( void )
   info.inputChannels = 2;
   info.isDefaultOutput = true;
   info.isDefaultInput = true;
+  info.nativeFormats = RTAUDIO_FLOAT32;
   deviceList_.push_back(info);
 }
 
@@ -10932,40 +10933,74 @@ bool RtApiBela::probeDeviceOpen( unsigned int deviceId, StreamMode mode, unsigne
                                    RtAudioFormat format, unsigned int *bufferSize,
                                    RtAudio::StreamOptions *options )
 {
-  
+  RtAudioErrorType errorType = RTAUDIO_DRIVER_ERROR;
+  std::string errorText;
+
+  stream_.deviceId[mode] = deviceId;
   stream_.doByteSwap[mode] = false;
+  stream_.sampleRate = sampleRate;
+  stream_.bufferSize = *bufferSize;
+  fprintf(stdout, "probeDeviceOpen: stream mode: %u\n", mode);
+  // fprintf(stdout, "probeDeviceOpen: stream bufferSize: %u\n", *bufferSize);
+  stream_.nBuffers = 1;
+  stream_.nUserChannels[mode] = channels;
+  // fprintf(stdout, "probeDeviceOpen: stream channels: %u\n", channels);
+  stream_.channelOffset[mode] = firstChannel;
+  // fprintf(stdout, "probeDeviceOpen: stream channel offset: %u\n", firstChannel);
   stream_.userFormat = format;
-  stream_.deviceFormat[mode] = RTAUDIO_FLOAT32;
-  stream_.nDeviceChannels[mode] = channels;
+  // fprintf(stdout, "probeDeviceOpen: stream deviceFormat: %lu\n", stream_.deviceFormat[mode]);
 
-  stream_.nUserChannels[mode] = 1;
-  stream_.channelOffset[mode] = 0;  
-
-  stream_.userInterleaved = false;
-  stream_.deviceInterleaved[mode] = true;
+  if ( options && options->flags & RTAUDIO_NONINTERLEAVED )
+    stream_.userInterleaved = false;
+  else
+    stream_.userInterleaved = true;
+  
+  //device 
+  stream_.deviceFormat[mode] = deviceList_[0].nativeFormats; //check if device id matches ID
+  stream_.deviceInterleaved[mode] = true; //<-- get value from BELA define
+  stream_.nDeviceChannels[mode] = 2; //Check separetly for input and output
 
   // Set flags for buffer conversion.
   stream_.doConvertBuffer[mode] = false;
 
-  // Allocate necessary internal buffers.
-  unsigned long bufferBytes;
-  bufferBytes = stream_.nUserChannels[mode] * *bufferSize * formatBytes( stream_.userFormat );
-  fprintf(stdout, "probeDeviceOpen: stream bufferBytes: %lu", bufferBytes);
-  stream_.userBuffer[mode] = (char *) calloc( bufferBytes, 1 );
-  if ( stream_.userBuffer[mode] == NULL ) {
-    errorText_ = "RtApiCore::probeDeviceOpen: error allocating user buffer memory.";
-    error( RTAUDIO_WARNING );
-  }
-  
-  stream_.bufferSize = *bufferSize;
-  stream_.nBuffers = channels;
 
-  stream_.sampleRate = sampleRate;
-  stream_.deviceId[mode] = deviceId;
-  stream_.state = STREAM_STOPPED;
+  // Set flags for buffer conversion.
+  stream_.doConvertBuffer[mode] = false;
+  if ( stream_.userFormat != stream_.deviceFormat[mode] ||
+       stream_.nUserChannels[0] != stream_.nDeviceChannels[0] ||
+       stream_.nUserChannels[1] != stream_.nDeviceChannels[1] )
+    stream_.doConvertBuffer[mode] = true;
+  else if ( stream_.userInterleaved != stream_.deviceInterleaved[mode] &&
+            stream_.nUserChannels[mode] > 1 )
+    stream_.doConvertBuffer[mode] = true;
+
+  fprintf(stdout, "probeDeviceOpen: stream doConvertBuffer %u\n", stream_.doConvertBuffer[mode]);
+  if ( stream_.doConvertBuffer[mode] )
+    setConvertInfo( mode, firstChannel );
+
+  // Allocate necessary internal buffers
+  unsigned long bufferBytes;
+  bufferBytes = stream_.nUserChannels[mode] * stream_.bufferSize * formatBytes( stream_.userFormat );
+
+  stream_.userBuffer[mode] = ( char* ) calloc( bufferBytes, 1 );
+  if ( !stream_.userBuffer[mode] ) {
+    errorType = RTAUDIO_MEMORY_ERROR;
+    errorText_ = "RtApiBela::probeDeviceOpen: Error allocating user buffer memory.";
+    goto Exit;
+  }
+
   stream_.callbackInfo.object = (void *) this;
   stream_.mode = mode;
   return SUCCESS;
+
+Exit:
+  if ( !errorText.empty() )
+  {
+    errorText_ = errorText;
+    error( errorType );
+  }
+  stream_.state = STREAM_STOPPED;
+  return FAILURE;
 }
 
 void RtApiBela::closeStream( void )
@@ -11001,25 +11036,25 @@ void RtApiBela :: callbackEvent( BelaContext *context ){
   double streamTime = getStreamTime();
   RtAudioStreamStatus status = 0;
   
-  #if 1
   int cbReturnValue = callback( stream_.userBuffer[0], stream_.userBuffer[1],
                                 stream_.bufferSize, streamTime, status, info->userData );
-  #endif
-  #if 0
-  int cbReturnValue = callback( (void *)context->audioOut, (void *)context->audioIn,
-                                stream_.bufferSize, streamTime, status, info->userData );
 
-  #endif
-  // float *samples = (float *) stream_.userBuffer[0];
-  
-  unsigned long bufferBytes;
-  bufferBytes =  2*stream_.bufferSize * formatBytes( stream_.userFormat );
-  memcpy(context->audioOut, stream_.userBuffer[0], bufferBytes);
-  // for(unsigned int n = 0; n < context->audioFrames; n++) {
-    // for(unsigned int channel = 0; channel < context->audioOutChannels; channel++) {
-      // audioWrite(context, n, 0, *samples++);
-    // }
-  // }
+  stream_.deviceBuffer = (char *)context->audioOut;
+
+  if ( stream_.doConvertBuffer[0] )
+    {
+      // Convert callback buffer to stream format
+      convertBuffer( stream_.deviceBuffer,
+                     stream_.userBuffer[0],
+                     stream_.convertInfo[0] );
+
+    }
+    else {
+      // no further conversion, simple copy userBuffer to deviceBuffer
+      memcpy( stream_.deviceBuffer,
+              stream_.userBuffer[0],
+              stream_.bufferSize * stream_.nUserChannels[0] * formatBytes( stream_.userFormat ) );
+    }
 }
 
 RtAudioErrorType RtApiBela :: startStream()
