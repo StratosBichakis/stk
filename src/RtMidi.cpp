@@ -70,6 +70,11 @@
 
 #endif
 
+#if defined(__LINUX_BELA__)
+  #define __LINUX_ALSA__
+  #undef __LINUX_BELA__
+#endif
+
 // Default for Windows is to add an identifier to the port names; this
 // flag can be defined (e.g. in your project file) to disable this behaviour.
 //#define RTMIDI_DO_NOT_ENSURE_UNIQUE_PORTNAMES

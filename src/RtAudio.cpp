@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <codecvt>
 #include <locale>
+#include <Stk.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -10916,7 +10917,7 @@ RtApiBela :: ~RtApiBela()
 void RtApiBela :: probeDevices( void )
 {
   // See list of required functionality in RtApi::probeDevices().
-  errorText_ = "RtApiBela: This class provides experimental functionality."; error( RTAUDIO_WARNING );
+  // errorText_ = "RtApiBela: This class provides experimental functionality."; error( RTAUDIO_WARNING );
   if(deviceList_.size() > 0) return;
   RtAudio::DeviceInfo info;
   info.ID = 0;
@@ -10940,8 +10941,6 @@ bool RtApiBela::probeDeviceOpen( unsigned int deviceId, StreamMode mode, unsigne
   stream_.doByteSwap[mode] = false;
   stream_.sampleRate = sampleRate;
   stream_.bufferSize = *bufferSize;
-  fprintf(stdout, "probeDeviceOpen: stream mode: %u\n", mode);
-  // fprintf(stdout, "probeDeviceOpen: stream bufferSize: %u\n", *bufferSize);
   stream_.nBuffers = 1;
   stream_.nUserChannels[mode] = channels;
   // fprintf(stdout, "probeDeviceOpen: stream channels: %u\n", channels);
@@ -10974,7 +10973,7 @@ bool RtApiBela::probeDeviceOpen( unsigned int deviceId, StreamMode mode, unsigne
             stream_.nUserChannels[mode] > 1 )
     stream_.doConvertBuffer[mode] = true;
 
-  fprintf(stdout, "probeDeviceOpen: stream doConvertBuffer %u\n", stream_.doConvertBuffer[mode]);
+  // fprintf(stdout, "probeDeviceOpen: stream doConvertBuffer %u\n", stream_.doConvertBuffer[mode]);
   if ( stream_.doConvertBuffer[mode] )
     setConvertInfo( mode, firstChannel );
 
@@ -11101,6 +11100,7 @@ RtAudioErrorType RtApiBela :: startStream()
 
   BelaInitSettings* settings = Bela_InitSettings_alloc(); // Standard audio settings;
   Bela_defaultSettings(settings);
+  settings->periodSize = stk::RT_BUFFER_SIZE;
   settings->setup = setup;
   settings->render = render;
   settings->cleanup = cleanup;
