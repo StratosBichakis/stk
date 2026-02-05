@@ -75,8 +75,11 @@ namespace stk {
 // following user-definable floating-point type.  You
 // can change this to "float" if you prefer or perhaps
 // a "long double" in the future.
+#if defined(__STK_FLOAT__)
 typedef float StkFloat;
-
+#else
+typedef double StkFloat;
+#endif
 //! STK error handling class.
 /*!
   This is a fairly abstract exception handling class.  There could
