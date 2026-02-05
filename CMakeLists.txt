@@ -12,7 +12,6 @@ SET_PROPERTY(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Release" "Debug" "RelWithD
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 if(MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /clr")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /DNDEBUG")
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /Z7 /Ob0 /Od /RTC1 /D_ITERATOR_DEBUG_LEVEL=2 /D_STK_DEBUG_ /D__RTAUDIO_DEBUG__ /D__RTMIDI_DEBUG__")
 else()
@@ -46,13 +45,54 @@ file(GLOB STK_SRC "./src/*.cpp") # GLOB instead of GLOB_RECURSE as the asio depe
 #========================================#
 if(REALTIME)
     if(ENABLE_JACK)
-        find_library(JACK_LIBRARY jack) # find_package(JACK) # TODO: NEED FindJACK.cmake
-        if(JACK_LIBRARY)
-            message("Jack API found: ${JACK_LIBRARY}")
-            link_libraries(${JACK_LIBRARY})
+        # Try to find PkgConfig
+        find_package(PkgConfig QUIET)
+
+        if(PkgConfig_FOUND)
+            # PkgConfig is available, use it
+            pkg_check_modules(JACK QUIET jack)
+        endif()
+
+        if(NOT JACK_FOUND)
+            # PkgConfig was not found or Jack was not found through it, try a fallback
+            message(STATUS "PkgConfig not found or failed to find Jack, attempting fallback")
+
+            # Fallback: Search in common locations
+            find_path(JACK_INCLUDE_DIR
+                NAMES jack/jack.h
+                HINTS
+                    ENV JACK_ROOT
+                    "$ENV{ProgramFiles}/Jack"
+                    /usr/local/include
+                    /usr/include
+            )
+
+            find_library(JACK_LIBRARY
+                NAMES jack
+                HINTS
+                    ENV JACK_ROOT
+                    "$ENV{ProgramFiles}/Jack"
+                    /usr/local/lib
+                    /usr/lib
+            )
+
+            # Check if the fallback was successful
+            if(JACK_INCLUDE_DIR AND JACK_LIBRARY)
+                set(JACK_FOUND TRUE)
+                set(JACK_INCLUDE_DIRS ${JACK_INCLUDE_DIR})
+                set(JACK_LIBRARIES ${JACK_LIBRARY})
+                message(STATUS "Found Jack (fallback):")
+                message(STATUS "  Includes: ${JACK_INCLUDE_DIRS}")
+                message(STATUS "  Libraries: ${JACK_LIBRARIES}")
+            else()
+                message(WARNING "Failed to find Jack library even with fallback. Please install Jack development package or ensure it is in a standard location.")
+            endif()
+        endif()
+
+        if(JACK_FOUND)
+            include_directories(${JACK_INCLUDE_DIRS})
+            link_libraries(${JACK_LIBRARIES})
             add_definitions(-D__UNIX_JACK__)
-        else()
-            message(WARNING "JACK support requires the jack library!")
         endif()
     endif()
 
